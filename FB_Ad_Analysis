@@ -1,0 +1,166 @@
+ad_data = read.csv("datasets_2678_4448_KAG_conversion_data.csv")
+
+df = ad_data
+
+library(dplyr)
+
+# replace character string age ranges with number
+df$age[df$age == '30-34'] = 32
+df$age[df$age == '35-39'] = 37
+df$age[df$age == '40-44'] = 42
+df$age[df$age == '45-49'] = 47
+
+# convert variable to integer
+df$age = as.integer(df$age)
+
+# let's just check that age variable now
+unique(df$age)
+
+# convert gender variable to integer
+df$gender[df$gender == 'M'] = 0
+df$gender[df$gender == 'F'] = 1
+df$gender = as.integer(df$gender)
+
+# abbreviate some variable names
+df = df %>%
+  rename(xyzCampId = xyz_campaign_id, fbCampId = fb_campaign_id, impr = Impressions,
+         conv = Total_Conversion, appConv = Approved_Conversion)
+
+glimpse(df)
+
+library(heatmaply)
+dataMatNorm = as.matrix(normalize(df, method = "standardize"))
+heatmap(dataMatNorm)
+
+# Create the additional KPIs
+df = df %>%
+  mutate(CTR = ((Clicks / impr) * 100), CPC = Spent / Clicks)
+
+df$CTR = round(df$CTR, 4)
+df$CPC = round(df$CPC, 2)
+
+glimpse(df)
+
+# create trimmed dataset
+dfTrim = df %>%
+  select(CTR, CPC, appConv, conv, impr, Spent, Clicks)
+
+# omit missing values, normalize data, calculate correlations and plot heatmap
+heatmap(cor(normalize(na.omit(dfTrim))))
+
+# set plot size options
+options(repr.plot.width=4, repr.plot.height=3)
+
+library(gplot2)
+ggplot(df, aes(as.factor(xyzCampId), Spent)) + geom_boxplot() + labs(x = "Campaign", y = "Advertising Spend")
+
+ggplot(df, aes(as.factor(xyzCampId), conv)) + geom_boxplot() + labs(x = "Campaign", y = "Conversions")
+
+# Filtering for Ad_campaign = 1178
+data1178 = ad_data %>%
+  rename(xyzCampId = xyz_campaign_id, fbCampId = fb_campaign_id, impr = Impressions,
+         conv = Total_Conversion, appConv = Approved_Conversion) %>%
+  filter(xyzCampId == 1178)
+
+glimpse(data1178)
+
+library(DataExplorer)
+
+# look for missing data
+plot_missing(data1178)
+
+# Distribution of data
+plot_bar(data1178)
+
+plot_histogram(data1178)
+
+# Correlation matrix for the 1178 campaign
+plot_correlation(data1178)
+                          
+# Feature Engineering
+
+data1178 = data1178 %>%
+  mutate(totConv = conv + appConv, conVal = conv * 5, appConVal = appConv * 100) %>%
+  mutate(totConVal = conVal + appConVal) %>%
+  mutate(costPerCon = round(Spent / totConv, 2), ROAS = round(totConVal / Spent, 2))
+
+data1178 = data1178 %>%
+  mutate(CPM = round((Spent / impr) * 1000, 2))
+
+# take a look at our new variables
+head(data1178)
+
+library(ggplot2)
+ggplot(data1178, aes(Spent, totConv)) + geom_point() + geom_smooth(method = "lm") +
+  labs(x = "Amount spent on campaign", y = "Total number of conersions")
+
+ggplot(data1178, aes(Spent, totConVal)) + geom_point() + geom_smooth(method = "lm") +
+  labs(x = "Amount spent on campaign", y = "Total value of conversions")
+
+# Boxplot via gender
+ggplot(data1178, aes(gender, ROAS)) + geom_boxplot() + scale_y_log10()
+
+# Wilcox test
+wilcox.test(ROAS ~ gender, data=data1178)
+
+data1178 %>%
+  select(gender, ROAS) %>%
+  group_by(gender) %>%
+  filter(ROAS != 'Inf') %>%
+  summarise(medianROAS = median(ROAS), meanROAS = mean(ROAS))
+
+# Boxplot - Clicks vs interests
+ggplot(data1178, aes(as.factor(interest), Clicks)) + geom_boxplot() +
+  labs(x = "Interest Identifier", y = "Number of Clicks")
+
+# Boxplot - ROAS vs interests
+data1178 %>%
+  ggplot(aes(as.factor(interest), ROAS)) + geom_boxplot() + scale_y_log10() +
+  labs(x = "Interest Identifier", y = "ROAS")
+
+data1178 %>%
+  select(interest, ROAS, Clicks) %>%
+  group_by(interest) %>%
+  filter(ROAS != 'Inf') %>%
+  summarise(medianROAS = round(median(ROAS) ,2), meanROAS = round(mean(ROAS), 2), clicks = sum(Clicks)) %>%
+  arrange(desc(meanROAS)) %>%
+  head(n = 10)
+
+# Analysis by Gender
+data1178 %>%
+  filter(interest == 101 | interest == 15 | interest == 21) %>%
+  ggplot(aes(x = as.factor(interest), y = ROAS, fill = gender)) + geom_boxplot() + scale_y_log10() +
+  labs(x = 'Interest ID', y = 'ROAS')
+
+data1178 %>%
+  select(interest, gender, ROAS, Clicks) %>%
+  group_by(interest, gender) %>%
+  filter(ROAS != 'Inf', interest == 101 | interest == 15 | interest == 21) %>%
+  summarise(medianROAS = round(median(ROAS), 2), meanROAS = round(mean(ROAS) ,2), clicks = sum(Clicks)) %>%
+  arrange(desc(meanROAS))
+
+# Analysis by Age
+
+data1178 %>%
+  filter(interest == 21 | interest == 15 & gender == 'M') %>%
+  group_by(age, interest) %>% 
+  ggplot(aes(x = as.factor(age), y = ROAS, fill = as.factor(interest))) + geom_boxplot() + scale_y_log10() +
+  labs(x = 'Age group', y = 'ROAS') + scale_fill_discrete(name="Interest\nID")
+
+data1178 %>%
+  select(age, interest, gender, ROAS, Clicks) %>%
+  group_by(age, interest) %>%
+  filter(ROAS != 'Inf', interest == 21 | interest == 15, gender == 'M') %>%
+  summarise(medianROAS = round(median(ROAS), 2), meanROAS = round(mean(ROAS) ,2), clicks = sum(Clicks)) %>%
+  arrange(desc(meanROAS))
+
+# Result 
+
+It looks like we're getting the best ROAS with aour 30 - 34 year old age group, so we could think about increasing 
+our spend to increase our visibility there. However, the more granular we go with the data, the lower our number of 
+observations and the less sure we can be about these differences being genuine, rather than simply noise.
+
+Of course, once you have performed an EDA such as this and come up with some insight, you can go back through 
+the data, picking your analyses with an endpoint in mind and using the appopriate statistical tests to see 
+how likely it is that these differences are due to chance, giving you more confidence in making appropriate 
+recommendations with the appropriate caveats
